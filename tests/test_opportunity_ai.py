@@ -97,3 +97,62 @@ class OpportunityBrainHelperTests(unittest.TestCase):
             )
         self.assertTrue(result["qualification"]["qualified"])
         self.assertEqual(result["distinct_employer_count"], 3)
+
+
+    def test_batch_review_requires_relevant_targeted_evidence(self):
+        result = {
+            "name": "Spreadsheet cleanup helper",
+            "problem": "Staff manually reconcile spreadsheet records",
+            "product_idea": "A guided spreadsheet validation tool",
+            "validation_query": "spreadsheet data reconciliation",
+            "difficulty": 2,
+            "resource_level": "low",
+            "nontechnical_friendly": True,
+            "distinct_employer_count": 5,
+            "distinct_employers": ["A Ltd", "B Ltd", "C Ltd", "D Ltd", "E Ltd"],
+            "listing_count": 5,
+            "evidence": [
+                {"company": "A Ltd", "title": "Data Clerk", "summary": "Reconcile daily spreadsheet records."}
+            ],
+            "qualification": {
+                "qualified": True,
+                "employer_threshold_met": True,
+                "difficulty_threshold_met": True,
+                "resource_threshold_met": True,
+                "nontechnical_friendly": True,
+            },
+            "status": "qualified",
+        }
+        response = {
+            "reviews": [{
+                "name": "Spreadsheet cleanup helper",
+                "problem_confirmed": True,
+                "demand_signal": "moderate",
+                "reasoning": "The targeted results repeatedly describe manual record reconciliation.",
+                "next_step": "Interview two office managers.",
+            }]
+        }
+        with patch.object(opportunity_ai, "call_brain", return_value=response):
+            reviewed = opportunity_ai.review_validation_batch(
+                [result], {"industry_focus": "office admin", "location": "Nigeria", "days": 14},
+                min_companies=5, max_difficulty=3,
+            )
+        self.assertTrue(reviewed[0]["qualification"]["qualified"])
+        self.assertTrue(reviewed[0]["qualification"]["ai_evidence_review_passed"])
+
+    def test_missing_brain_review_fails_closed(self):
+        result = {
+            "name": "Spreadsheet cleanup helper",
+            "distinct_employer_count": 5,
+            "distinct_employers": ["A", "B", "C", "D", "E"],
+            "listing_count": 5,
+            "evidence": [],
+            "qualification": {"qualified": True},
+            "status": "qualified",
+        }
+        with patch.object(opportunity_ai, "call_brain", return_value={"reviews": []}):
+            reviewed = opportunity_ai.review_validation_batch(
+                [result], {"industry_focus": "admin", "location": None, "days": 14},
+                min_companies=5, max_difficulty=3,
+            )
+        self.assertFalse(reviewed[0]["qualification"]["qualified"])

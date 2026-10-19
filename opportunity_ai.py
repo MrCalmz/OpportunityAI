@@ -331,6 +331,88 @@ def validate_idea(
     }
 
 
+
+
+def review_validation_batch(
+    results: list[dict[str, Any]],
+    plan: dict[str, Any],
+    *,
+    min_companies: int,
+    max_difficulty: int,
+) -> list[dict[str, Any]]:
+    """Send the targeted search evidence to the Brain once per batch, not once per job."""
+    if not results:
+        return results
+
+    payload_results = []
+    for result in results:
+        payload_results.append({
+            "name": result.get("name"),
+            "problem": result.get("problem"),
+            "product_idea": result.get("product_idea"),
+            "validation_query": result.get("validation_query"),
+            "difficulty": result.get("difficulty"),
+            "resource_level": result.get("resource_level"),
+            "nontechnical_friendly": result.get("nontechnical_friendly"),
+            "rule_checks_passed_before_ai_review": bool(result.get("qualification", {}).get("qualified")),
+            "distinct_employer_count_computed_by_code": result.get("distinct_employer_count", 0),
+            "distinct_employers_computed_by_code": result.get("distinct_employers", [])[:12],
+            "listing_count": result.get("listing_count", 0),
+            "targeted_evidence": result.get("evidence", [])[:8],
+        })
+
+    system = (
+        "You are the final evidence reviewer for a practical entrepreneur. The supplied targeted listings were "
+        "found after searching for each proposed workflow. Decide whether the results genuinely support the same "
+        "repetitive business problem—not merely whether the query word appears. Distinct-employer counts are "
+        "computed by the application and must not be changed. A job ad is only a demand signal, not proof of "
+        "purchase intent. Use weak when listings are incidental, unrelated, too thin, or ambiguous; use moderate "
+        "or strong only when multiple listings describe substantially similar work. Never invent facts. "
+        "Return JSON with a 'reviews' array. For every candidate include its exact name, problem_confirmed "
+        "(boolean), demand_signal (weak/moderate/strong), reasoning (short), and next_step (short)."
+    )
+    response = call_brain(_messages(system, {
+        "industry_focus": plan.get("industry_focus"),
+        "location": plan.get("location"),
+        "timeframe_days": plan.get("days"),
+        "minimum_distinct_employers": min_companies,
+        "maximum_build_difficulty": max_difficulty,
+        "candidates_with_targeted_results": payload_results,
+    }), max_tokens=2200)
+
+    reviews = response.get("reviews", [])
+    by_name: dict[str, dict[str, Any]] = {}
+    if isinstance(reviews, list):
+        for review in reviews:
+            if isinstance(review, dict):
+                key = _normal(review.get("name"))
+                if key:
+                    by_name.setdefault(key, review)
+
+    reviewed_results = []
+    for result in results:
+        review = by_name.get(_normal(result.get("name")), {})
+        signal = _as_string(review.get("demand_signal"), 20).lower()
+        if signal not in {"weak", "moderate", "strong"}:
+            signal = "weak"
+        problem_confirmed = review.get("problem_confirmed") is True
+        rule_passed = bool(result.get("qualification", {}).get("qualified"))
+        ai_passed = problem_confirmed and signal in {"moderate", "strong"}
+        qualified = rule_passed and ai_passed
+        result["ai_review"] = {
+            "problem_confirmed": problem_confirmed,
+            "demand_signal": signal,
+            "reasoning": _as_string(review.get("reasoning"), 450)
+                or "No matching evidence review was returned; not promoted.",
+            "next_step": _as_string(review.get("next_step"), 300),
+        }
+        result["qualification"]["ai_evidence_review_passed"] = ai_passed
+        result["qualification"]["qualified"] = qualified
+        result["status"] = "qualified" if qualified else "not qualified"
+        reviewed_results.append(result)
+    return reviewed_results
+
+
 def _load_memory(path: Path) -> list[dict[str, Any]]:
     try:
         value = json.loads(path.read_text(encoding="utf-8"))
@@ -382,10 +464,8 @@ def run_research(args: argparse.Namespace) -> dict[str, Any]:
             })
             break
 
-        validated_in_round = 0
+        round_results: list[dict[str, Any]] = []
         for idea in new_proposals:
-            if len(qualified_this_run) >= args.count:
-                break
             previous_names.add(_normal(idea["name"]))
             total_candidates += 1
             try:
@@ -408,6 +488,17 @@ def run_research(args: argparse.Namespace) -> dict[str, Any]:
                     "error": str(exc),
                     "qualification": {"qualified": False},
                 }
+            round_results.append(result)
+
+        # The Brain receives the targeted results in one bounded batch and checks
+        # topical relevance. Python remains responsible for the employer-count rule.
+        reviewed_results = review_validation_batch(
+            round_results,
+            plan,
+            min_companies=args.min_companies,
+            max_difficulty=args.max_difficulty,
+        )
+        for result in reviewed_results:
             attempted.append(result)
             seen.append({
                 "name": result["name"],
@@ -419,7 +510,7 @@ def run_research(args: argparse.Namespace) -> dict[str, Any]:
                 qualified_this_run.append(result)
                 if not any(_normal(item.get("name")) == _normal(result["name"]) for item in saved):
                     saved.append(result)
-            validated_in_round += 1
+        validated_in_round = len(round_results)
 
         round_summaries.append({
             "round": round_number,

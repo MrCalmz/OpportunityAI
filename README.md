@@ -45,7 +45,7 @@ The report is saved to opportunity_report.json; newly qualified ideas are added 
 - Uses one broad initial scan, a small candidate batch, and targeted checks only for each candidate.
 - Uses a 100-listing page for the general feed, limited pagination for regional feeds, and the existing local cache.
 - Checks ideas in batches, with a configurable round limit and a maximum of 6 proposed ideas per round.
-- Uses AI to plan and judge ideas, but Python counts unique employers and enforces qualification rules.
+- Sends each batch of targeted results back to the Brain for one relevance review. Python counts unique employers and enforces qualification rules.
 - Retains source links and names; verify each listing is still current.
 
 ## Classic job search CLI
