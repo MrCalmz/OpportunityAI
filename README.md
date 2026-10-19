@@ -1,164 +1,83 @@
-# Opportunity
+# OpportunityAI
 
-A Python-first, local/Google Colab-friendly **multi-source job discovery tool**. Enter a phrase such as `data entry` to search by keyword, or omit the phrase to browse latest available listings. It queries several public job feeds (many of them remote-focused) and related job-title variants, normalizes the listings, applies optional publication-date, location, and work-mode filters, merges duplicates, and returns original job/application links plus descriptions, dates, salary fields when published, and source status.
+OpportunityAI is a lightweight Python tool for discovering business automation opportunities from real job listings. Its DeepSeek AI Brain looks for repeated manual work, estimates whether a low-cost tool, bot, or agent is feasible, and checks how many distinct employers appear to need similar work.
 
-> **Coverage honesty:** no public interface can guarantee every job on every platform. This project queries its configured sources and reports which ones succeeded, failed, used cached results, or hit a pagination cap. It does not claim a source was searched when it was not.
+It has two modes:
+- **Free Check:** the first collection uses no search keyword and sorts the newest available listings first. The Brain then suggests ideas and runs focused validation searches.
+- **Targeted Check:** the Brain converts an industry/task request into a focused first search, then validates ideas with related job searches.
 
-## Run on your PC
+The Brain's default sources are general-purpose listings, not a remote-only feed: Dev Global Jobs and Arbeitnow's Europe/UK feeds. Remote-focused sources remain available for the classic collector, but are not used by the Brain by default. Coverage is incomplete; listings are signals to investigate, not proof of willingness to buy.
 
-Requires Python 3.10+ (Python 3.11+ recommended). The core search uses only the Python standard library—no package installation is required.
+## Quick start
 
-```bash
-git clone https://github.com/AgentCalmz/opportunity.git
-cd opportunity
-# Search data-entry jobs posted in the last 5 days
-python opportunity.py "data entry" --days 5
+Requires Python 3.10+ and a DeepSeek API key. The code uses only the Python standard library; no package installation or database is needed.
 
-# Browse newest available listings without entering a keyword
-python opportunity.py
+Set your key as an environment variable (do not commit it):
+- Windows PowerShell: $env:DEEPSEEK_API_KEY="your-key"
+- macOS/Linux: export DEEPSEEK_API_KEY="your-key"
 
-# Browse listings from the last 5 days without a keyword
-python opportunity.py --days 5
+Optional model setting: OPPORTUNITY_BRAIN_MODEL=deepseek-flash.
 
-# Optional: exclude known onsite/hybrid listings and keep remote-only results
-python opportunity.py "data entry" --days 5 --remote-only
-```
+~~~bash
+# Free Check: first scan is keyword-free
+python opportunity_ai.py --mode free --request "Find simple, low-cost automations for Nigerian small businesses" --count 5 --min-companies 5
 
-Other useful PC commands (run these from inside the `opportunity` folder):
+# Targeted Check: initial search is focused on an industry/task
+python opportunity_ai.py --mode targeted --request "Private schools in Nigeria" --count 5 --min-companies 5
 
-```bash
-# See every available option
+# Faster, more constrained run
+python opportunity_ai.py --mode targeted --request "Clinic admin tasks in Nigeria" --days 10 --location Nigeria --count 3 --min-companies 4 --max-rounds 1
+~~~
+
+Options:
+- count: how many different qualified ideas to seek (default 5; max 20).
+- min-companies: minimum distinct named employers in the validation results (default 5).
+- days and location: explicit overrides; otherwise the Brain infers sensible values from your request (default timeframe is 14 days).
+- max-rounds: number of proposal batches (default 2; hard maximum 4).
+- max-difficulty: highest acceptable build difficulty (default 3/5).
+
+Qualified opportunities must meet a rule enforced by Python: enough distinct employers, estimated difficulty 3/5 or less, low/medium resources, and a non-technical-friendly workflow. If only three ideas meet the criteria, the tool returns three rather than inventing extra opportunities. The Brain's estimates are hypotheses; talk to real businesses before building.
+
+The report is saved to opportunity_report.json; newly qualified ideas are added to opportunity_memory.json. These local files are ignored by Git. Repeated names are excluded from later runs to reduce redundant research.
+
+## How the Brain stays bounded
+
+- Uses one broad initial scan, a small candidate batch, and targeted checks only for each candidate.
+- Uses a 100-listing page for the general feed, limited pagination for regional feeds, and the existing local cache.
+- Checks ideas in batches, with a configurable round limit and a maximum of 6 proposed ideas per round.
+- Uses AI to plan and judge ideas, but Python counts unique employers and enforces qualification rules.
+- Retains source links and names; verify each listing is still current.
+
+## Classic job search CLI
+
+The original opportunity.py collector remains available. It can search with a keyword or browse newest jobs with no keyword:
+
+~~~bash
 python opportunity.py --help
-
-# Browse all recent jobs the feeds currently expose, newest first
 python opportunity.py
+python opportunity.py "data entry" --days 14 --location Nigeria
+python opportunity.py "customer support" --days 5 --source arbeitnow-eu
+~~~
 
-# Browse only the last 14 days of listings (no keyword needed)
-python opportunity.py --days 14
+The collector supports additional remote-focused feeds as optional sources, so it remains useful for its original job-search use case. Source coverage, rate limits, caching, dates, and location eligibility affect results.
 
-# Find related jobs posted in the last 5 days in Nigeria; keep every work mode
-python opportunity.py "customer support" --days 5 --location Nigeria
+## Sources and terms
 
-# Use a fixed start date
-python opportunity.py "data entry" --since 2026-10-01
+The AI Brain's default search list:
+- [Dev Global Jobs API](https://devglobaljobs.com/developers) — general international roles; public no-key API, one 100-listing page per query. Its published terms allow internal/non-commercial use without extra permission; preserve the original listing link and attribution.
+- [Arbeitnow](https://blog.arbeitnow.com/blog/job-board-api) — general Europe and UK listings; public no-key feeds with limited pagination.
 
-# Search selected sources only; repeat --source for more sources
-python opportunity.py "data entry" --days 5 --source himalayas --source jobicy
+Other source adapters in opportunity.py include remote-focused feeds (Himalayas, Jobicy, Remote OK, RemoteJobs.org, We Work Remotely, and Remotive). They are not part of the AI Brain's default source list.
 
-# Save the full report (including full descriptions) to JSON
-python opportunity.py "data entry" --days 5 --out results.json
+## Important limitations
 
-# Save a no-keyword latest-listings report to JSON
-python opportunity.py --out latest_results.json
+Job ads do not prove that an employer wants to buy automation. Different listings can describe one employer's single need, and similar job titles can hide different tasks. Employer counts are deduplicated by company name, which is helpful but not perfect. The Brain is not permitted to fabricate demand; low evidence should result in fewer qualified ideas.
 
-# Output JSON to a file through shell redirection
-python opportunity.py --json > latest_results.json
-
-# Run the unit tests
-python -m unittest discover -s tests -v
-
-# Compile-check the main code and tests
-python -m py_compile opportunity.py tests/test_opportunity.py
-
-# Pull the newest version from GitHub when updates are published
-git pull --ff-only origin main
-```
-
-On Windows, use `py` instead of `python` if that is the command that works on your computer (for example, `py opportunity.py --help`). Run `git clone https://github.com/AgentCalmz/opportunity.git` only once; for later updates, first `cd opportunity` and then use `git pull --ff-only origin main`. To use the CLI you need Python 3.10+ and Git installed.
-
-Date filters use the listing's publication date. If the source does not give a parseable date, the listing is excluded when a timeframe is requested and counted in the audit instead of being falsely labelled recent. A date filter cannot retrieve older jobs if a provider does not retain them.
-
-## Use in Google Colab
-
-Open `opportunity_colab.ipynb` in Colab, or run these cells in a new notebook:
-
-```python
-!git clone https://github.com/AgentCalmz/opportunity.git
-%cd opportunity
-
-from opportunity import search_jobs, print_report
-
-# Latest available listings, no keyword filter, newest first:
-report = search_jobs("", days=None, location=None, remote_only=False)  # use location="Nigeria" to restrict eligibility
-
-# For keyword search instead, try:
-# report = search_jobs("data entry", days=5, location="Nigeria", remote_only=False)
-print_report(report)
-```
-
-To inspect results as a table:
-
-```python
-import pandas as pd
-
-columns = [
-    "title", "company", "location", "published_at",
-    "employment_type", "salary_min", "salary_max",
-    "salary_currency", "job_url", "apply_url", "source_name"
-]
-df = pd.DataFrame(report["results"])
-display(df[[column for column in columns if column in df.columns]])
-```
-
-To save a complete, portable report:
-
-```python
-import json
-
-with open("opportunity_results.json", "w", encoding="utf-8") as file:
-    json.dump(report, file, ensure_ascii=False, indent=2)
-
-# Optional, in Google Colab:
-from google.colab import files
-files.download("opportunity_results.json")
-```
-
-## Public sources currently connected
-
-| Source | Access | Important limitation |
-|---|---|---|
-| [Himalayas](https://himalayas.app/api) | Public JSON search endpoint, no key required | Data refreshes daily; rate limits can change and the API may return 429. Retain source attribution and link to the original listing. |
-| [Jobicy](https://github.com/Jobicy/remote-jobs-api) | Public JSON API, no key required | Endpoint only provides jobs from the most recent 7 days; up to 200 jobs/page and cursor pagination. |
-| [Remote OK](https://remoteok.com/faq) | Public JSON feed, no key required | Feed availability and practical limits can change; retain source attribution and direct job link. |
-| [RemoteJobs.org](https://remotejobs.org/developers/api) | Public no-key JSON search API with title/description keyword search and pagination | Published guidance says stay below 200 requests/hour/IP; responses are locally cached for one hour and should carry attribution. |
-| [We Work Remotely](https://weworkremotely.com/remote-job-rss-feed) | Public RSS feed | Recent feed, not a complete historical database; attribute the source. Review API terms before redistributing. |
-| [Remotive](https://remotive.com/remote-jobs/api) | Public JSON feed, no key required | Cached locally for 24 hours to respect the provider's low-frequency guidance; listings may be delayed. Attribution and source terms apply. |
-| [Arbeitnow](https://blog.arbeitnow.com/blog/job-board-api) | Public JSON feed for Europe and UK, no key required | Regional coverage, not a global job feed. Pagination is capped to avoid excessive requests. |
-
-By default, the app includes remote, hybrid, onsite, and unspecified work modes wherever the selected source provides them. Add `--remote-only` on the CLI or pass `remote_only=True` to `search_jobs(...)` to exclude listings explicitly marked onsite or hybrid. Most connected feeds are remote-focused, so disabling the filter does not turn them into general-purpose job boards; it includes non-remote listings only when a source actually supplies them. The app reports per-source health and cache use. A failed source does not prevent successful sources from returning results. Requests are cached locally to lower repeat calls and to help when a provider is temporarily unavailable. Cache files are stored in `.opportunity-cache/` by default and can be moved by setting `OPPORTUNITY_CACHE_DIR`.
-
-## Optional configuration
-
-No API keys are required for the configured public sources. The adapters use modest request budgets, a local cache, and per-source status messages. The default query budget prioritizes trying each related job-title phrase before fetching deeper pages from any one phrase.
-
-Optional environment variables:
-
-- `OPPORTUNITY_CACHE_DIR`: cache directory (default `.opportunity-cache`).
-- `OPPORTUNITY_SOURCES`: comma-separated source allowlist, e.g. `himalayas,jobicy,remoteok`.
-- `OPPORTUNITY_MAX_PAGES`: pagination cap per phrase for paginated sources (default 10).
-- `OPPORTUNITY_REMOTEJOBS_MAX_REQUESTS`: per-search request budget for RemoteJobs.org (default 60, capped at 150 to stay below its published 200/hour/IP guidance).
-- `OPPORTUNITY_JOBICY_MAX_REQUESTS`: per-search request budget for Jobicy variants (default 30, capped at 60).
-- `OPPORTUNITY_HIMALAYAS_MAX_REQUESTS`: per-search request budget for Himalayas variants (default 20, capped at 50).
-
-Higher request budgets improve coverage but increase traffic. RemoteJobs.org explicitly asks clients to stay below 200 requests per hour per IP; its default request budget is set below that guidance. Responses are cached locally to reduce repeated requests. Do not treat an undocumented provider limit as unlimited.
-## Result fields
-
-Each result preserves the original listing URL and includes company, title, location/eligibility, publication date, work mode, normalized summary and full description, tags, employment type/seniority when provided, optional salary fields, application URL, source attribution, and a keyword relevance score with the field that matched. Salary, employment type, seniority, dates, company names, and eligibility are not available for every source; missing fields remain marked unknown rather than being invented.
-
-With an empty query, the tool skips keyword filtering and sorts returned listings by publication date, newest first. Use `days=None` to browse all dates that the configured feeds expose, or `days=5` to limit the results to the last 5 days. "Latest" means latest available from these feeds: source-specific retention periods, caches, pagination limits, and outages can affect coverage.
-
-Search is deliberately **recall-first**: it keeps exact keyword mentions and recognized job-title variants in the main results list and labels each result as a direct/close related match or a broader keyword hit. For `data entry`, variants include data entry clerk/operator/keyer, data encoder, data capture, data transcription/transcriber, records clerk/specialist, document indexing/processing, and data-processing roles. Several related titles are drawn from O*NET's published job-title examples for data-entry work: https://www.onetonline.org/link/summary/43-9021.00. Broader matches can include incidental mentions, so use the match reason and original listing to judge relevance rather than expecting the engine to hide every weak hit. Unknown country eligibility is retained for manual review instead of silently discarded.
-
-When duplicate listings appear on multiple platforms, the tool merges them and retains the alternate source links in `source_links`.
-
-## Adding more platforms
-
-The long-term approach is a provider-adapter architecture. Platforms with public APIs or RSS feeds can usually be added directly. Some APIs are free only with registration/keys, and many major job boards do not expose a global public search endpoint. Greenhouse and Lever, for example, expose public listings per employer's board token; they do not provide a single global search over every employer. Such sources need a separate company/board discovery index, not just another generic API call.
-
-**"Free" does not mean unlimited.** When a provider publishes a limit, it is documented above. When a provider does not publish a limit, this app treats it as undocumented—not unlimited—and uses caching, pagination caps, modest concurrency, retry handling, and source status reporting. Before rehosting or redistributing job data in a public product, review each platform's current terms and attribution requirements.
+The Dev Global Jobs API's published terms restrict free API use to internal/non-commercial use unless permission is obtained. This implementation is intended for private research; review the provider's current terms before using it as part of a commercial service or redistributing its data. Other providers also have their own policies and limits.
 
 ## Tests
 
-```bash
+~~~bash
+python -m py_compile opportunity.py opportunity_ai.py tests/test_opportunity.py tests/test_opportunity_ai.py
 python -m unittest discover -s tests -v
-```
+~~~

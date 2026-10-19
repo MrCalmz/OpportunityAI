@@ -9,3 +9,8 @@ venv/
 .opportunity-cache/
 *.log
 .coverage
+
+# Local AI research output and feed cache
+.opportunity-cache/
+opportunity_report.json
+opportunity_memory.json

@@ -19,8 +19,10 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - name: Compile
-        run: python -m py_compile opportunity.py tests/test_opportunity.py
+        run: python -m py_compile opportunity.py opportunity_ai.py tests/test_opportunity.py tests/test_opportunity_ai.py
       - name: Unit tests
         run: python -m unittest discover -s tests -v
       - name: Check CLI help
         run: python opportunity.py --help
+      - name: Check AI Brain help
+        run: python opportunity_ai.py --help
