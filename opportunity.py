@@ -1,4 +1,4 @@
-"""Opportunity: local and Colab-friendly multi-source remote-job search.
+"""Opportunity: local and Colab-friendly multi-source job search across work modes.
 
 Only Python's standard library is required. Sources may change schemas, availability,
 terms, and rate limits; the report therefore includes a status for each adapter.
@@ -26,7 +26,7 @@ from typing import Any, Callable
 VERSION = "0.1.0"
 USER_AGENT = (
     "Opportunity/0.1 (personal job discovery; "
-    "https://github.com/AgentCalmz/opportunity)"
+    "https://github.com/MrCalmz/OpportunityAI)"
 )
 HOUR = 60 * 60
 DAY = 24 * HOUR
@@ -62,6 +62,10 @@ SOURCE_NOTES = {
     ),
     "arbeitnow-uk": (
         "No-key public UK feed. It is not a global census."
+    ),
+    "devglobaljobs": (
+        "General international listings across industries and work arrangements; no key required. "
+        "Respect the provider's internal/non-commercial use terms and retain its job-page link."
     ),
 }
 
@@ -1005,7 +1009,116 @@ def _fetch_arbeitnow(base_url: str, source_id: str, source_name: str, days: int 
         return _source_error(source_id, source_name, exc)
 
 
+
+
+def _devglobaljobs_job(raw: Any) -> dict[str, Any] | None:
+    """Normalize one general-purpose Dev Global Jobs listing."""
+    if not isinstance(raw, dict):
+        return None
+
+    organization = raw.get("organization") or raw.get("organisation") or raw.get("company")
+    if isinstance(organization, dict):
+        organization = _first(
+            organization.get("name"), organization.get("display_name"), organization.get("title")
+        )
+
+    location = _first(
+        raw.get("location"), raw.get("location_name"), raw.get("city"),
+        raw.get("country"), default="Location not specified",
+    )
+    if isinstance(location, dict):
+        location = _first(
+            location.get("display_name"), location.get("name"), location.get("city"),
+            location.get("country"), default="Location not specified",
+        )
+
+    remote_value = _first(raw.get("remote_status"), raw.get("work_mode"), raw.get("workplace_type"))
+    remote_label = str(remote_value or "").strip().lower()
+    if raw.get("remote") is True or remote_label in {"remote", "fully remote", "work from home"}:
+        remote_status = "remote"
+    elif remote_label == "hybrid":
+        remote_status = "hybrid"
+    elif raw.get("remote") is False or remote_label in {"onsite", "on-site", "office", "in person", "in-person"}:
+        remote_status = "onsite"
+    else:
+        # Do not guess the work arrangement when the feed does not state it.
+        remote_status = "unknown"
+
+    job_url = _first(
+        raw.get("job_url"), raw.get("url"), raw.get("jobUrl"),
+        raw.get("link"), raw.get("job_page_url"),
+    )
+    job = _make_job(
+        source_id="devglobaljobs",
+        source_name="Dev Global Jobs",
+        title=raw.get("title"),
+        company=organization,
+        url=job_url,
+        description=_first(raw.get("description"), raw.get("summary"), raw.get("excerpt"), default=""),
+        summary=_first(raw.get("summary"), raw.get("excerpt"), raw.get("description"), default=""),
+        published_at=_first(
+            raw.get("posted_at"), raw.get("published_at"), raw.get("created_at"),
+            raw.get("posting_date"), raw.get("date"),
+        ),
+        location=location,
+        remote_status=remote_status,
+        employment_type=_first(raw.get("employment_type"), raw.get("job_type"), raw.get("type")),
+        seniority=_first(raw.get("seniority"), raw.get("experience_level")),
+        tags=[
+            *_string_list(raw.get("category")),
+            *_string_list(raw.get("industry")),
+            *_string_list(raw.get("tags")),
+        ],
+        apply_url=_first(raw.get("apply_url"), raw.get("application_url"), job_url),
+    )
+    if job is not None:
+        salary_text = _first(raw.get("salary_text"), raw.get("salary"), raw.get("salary_range"))
+        if salary_text:
+            job["salary_text"] = strip_html(salary_text)[:160]
+        if isinstance(raw.get("country"), str):
+            job["country"] = raw["country"].strip()
+    return job
+
+
+def _fetch_devglobaljobs(query: str, days: int | None) -> dict[str, Any]:
+    """Fetch one bounded page from a general multi-industry jobs feed."""
+    source_id, source_name = "devglobaljobs", "Dev Global Jobs"
+    try:
+        params = {"limit": "100", "offset": "0"}
+        if query.strip():
+            params["search"] = query.strip()[:100]
+        url = "https://devglobaljobs.com/api/v1/jobs?" + urllib.parse.urlencode(params)
+        data, meta = _request_json(url, ttl_seconds=15 * 60)
+
+        if isinstance(data, list):
+            rows = data
+        elif isinstance(data, dict):
+            rows = data.get("jobs", data.get("data", data.get("results", [])))
+            if isinstance(rows, dict):
+                rows = rows.get("jobs", rows.get("data", []))
+        else:
+            rows = []
+        if not isinstance(rows, list):
+            rows = []
+
+        jobs = [job for raw in rows if (job := _devglobaljobs_job(raw))]
+        message = (
+            f"Queried the general job feed for: {query.strip()[:100]}."
+            if query.strip() else "Fetched the newest general job listings."
+        )
+        if len(rows) >= 100:
+            message += " Results are limited to one 100-listing page to keep checks fast."
+        return _result(
+            source_id, source_name, jobs, meta,
+            status="partial" if len(rows) >= 100 else "ok",
+            message=message,
+        )
+    except Exception as exc:
+        return _source_error(source_id, source_name, exc)
+
+
 SOURCE_RUNNERS: dict[str, tuple[str, Callable[..., dict[str, Any]]]] = {
+    "devglobaljobs": ("Dev Global Jobs", _fetch_devglobaljobs),
     "himalayas": ("Himalayas", _fetch_himalayas),
     "jobicy": ("Jobicy", _fetch_jobicy),
     "remoteok": ("Remote OK", _fetch_remoteok),
